@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"io/ioutil"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/contrib/sessions"
 )
@@ -53,79 +56,109 @@ func currentUser(session sessions.Session) User {
 		u.ID = session.Get("uid").(int)
 		u.Name = session.Get("uName").(string)
 	}
-	
+
 	return u
 }
 
 
-// BuyingHistory : products which user had bought
-func (u *User) BuyingHistory() (products []Product) {
-	// 30件だけ読み込めば短くする件数を抑えられる.
-	rows, err := db.Query(
-		"SELECT p.id, p.name, LEFT(p.description, 70), p.image_path, p.price, h.created_at "+
-			"FROM histories as h "+
-			"LEFT OUTER JOIN products as p "+
-			"ON h.product_id = p.id "+
-			"WHERE h.user_id = ? "+
-			"ORDER BY h.id DESC LIMIT 30", u.ID)
+func initBuyingHistoriy() [5000][]Product {
+	// read json
+	raw, err := ioutil.ReadFile("./initBuyingHistory.json")
 	if err != nil {
-		return nil
+		panic(err)
 	}
+	buyhist := [5000][]Product{}
+	json.Unmarshal(raw, &buyhist)
 
-	defer rows.Close()
-	for rows.Next() {
-		p := Product{}
-		var cAt string
-		fmt := "2006-01-02 15:04:05"
-		err = rows.Scan(&p.ID, &p.Name, &p.Description, &p.ImagePath, &p.Price, &cAt)
-		tmp, _ := time.Parse(fmt, cAt)
-		p.CreatedAt = (tmp.Add(9 * time.Hour)).Format(fmt)
-		if err != nil {
-			panic(err.Error())
+	// 30件までしか使用しない.
+	for uid := 1; uid <= 5000; uid++ {
+		if len(buyhist[uid-1]) > 30 {
+			buyhist[uid-1] = buyhist[uid-1][0:30]
 		}
-		products = append(products, p)
+
+		for i, p := range buyhist[uid-1] {
+			// shorten description and comment
+			if utf8.RuneCountInString(p.Description) > 70 {
+				p.Description = string([]rune(p.Description)[:70]) + "…"
+				buyhist[uid-1][i] = p
+			}
+		}
 	}
 
-	return
+	return buyhist
+}
+
+
+// BuyingHistory : products which user had bought
+func (u *User) BuyingHistory() ([]Product, int) {
+	buyingHistoryLock.RLock()
+	userBuyingHistory := buyingHistoryCache[u.ID-1]
+	totalPay, ok := userTotalPay.Load(u.ID)
+	//sum := userSumCache[u.ID-1]
+	buyingHistoryLock.RUnlock()
+
+	if !ok {
+		totalPay = 0
+	}
+	
+
+	return userBuyingHistory, totalPay.(int)
 }
 
 
 // BuyProduct : buy product
 func (u *User) BuyProduct(pid string) {
-	sum_user := "sum_user" + strconv.Itoa(u.ID)
 	pid_int, err := strconv.Atoi(pid)
 	if err != nil {
 		panic(err)
 	}
 
-	product := getProduct(pid_int)
-	incr_err := rdb.IncrBy(ctx, sum_user, int64(product.Price)).Err()
-	if incr_err != nil {
-		panic(incr_err)
+	buyingHistoryLock.Lock()
+	{	
+		// update total buy
+		product := getProduct(pid_int)
+		totalPay, ok := userTotalPay.Load(u.ID)
+		if !ok {}
+		userTotalPay.Store(u.ID, totalPay.(int) + product.Price)
+
+
+		latest_p := []Product{productMemoTable[pid_int - 1]}
+		latest_p[0].CreatedAt = (time.Now()).Format("2006-01-02 15:04:05")
+		// shorten description and comment
+		if utf8.RuneCountInString(latest_p[0].Description) > 70 {
+			latest_p[0].Description = string([]rune(latest_p[0].Description)[:70]) + "…"
+		}
+
+		// 30件プールされていたら最後尾(最古)をpop
+		if len(buyingHistoryCache[u.ID-1]) > 30 {
+			buyingHistoryCache[u.ID-1] = buyingHistoryCache[u.ID-1][0:29]
+		} 
+
+		// 一番前にpush
+		latest_p = append(latest_p, buyingHistoryCache[u.ID-1]...)
+		buyingHistoryCache[u.ID-1] = latest_p
+		
+		isBoughtMemoTable[u.ID-1][pid_int - 1] = true
+
 	}
+	buyingHistoryLock.Unlock()
 
-	db.Exec(
-		"INSERT INTO histories (product_id, user_id, created_at) VALUES (?, ?, ?)",
-		pid, u.ID, time.Now())
-	
 
-	isBoughtMemoTable[u.ID-1][pid_int - 1] = true
+	// ここはベンチマーカーがDBを利用してるらしいので消せない.
+	db.Exec( "INSERT INTO histories (product_id, user_id, created_at) VALUES (?, ?, ?)", pid, u.ID, time.Now())
 }
 
 
 // CreateComment : create comment to the product
 func (u *User) CreateComment(pid string, content string) {
 	//getCommentがいらないので、コメント件数にインクリメントするだけ.
-
-	//comment pid の値に1加算する.
-	err := rdb.Incr(ctx, "count_"+pid).Err()
-	if err != nil {
-		panic(err)
+	pid_int, e := strconv.Atoi(pid)
+	if e != nil {
+		panic(e)
 	}
+	cnt, ok := commentCount.Load(pid_int)
+	if ok {}
+	commentCount.Store(pid_int, cnt.(int) + 1)
 
-	pid_int, err := strconv.Atoi(pid)
-	if err != nil {
-			panic(err)
-	}
 	productsWithComments[pid_int - 1].CommentCount += 1
 }
