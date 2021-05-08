@@ -118,26 +118,17 @@ func main() {
                 })
         })
 
-        // GET /users/:userId
+        // GET /users/:userId        
         r.GET("/users/:userId", func(c *gin.Context) {
                 cUser := currentUser(sessions.Default(c))
-
                 uid, _ := strconv.Atoi(c.Param("userId"))
                 user := getUser(uid)
-
-                // shorten description
-                //左から70文字とるだけなので、sqlでやってしまう.
                 sdProducts, totalPay := user.BuyingHistory()
-                //totalPay := getBuyingSum(uid)
-
-                r.SetHTMLTemplate(template.Must(template.ParseFiles(layout, "templates/mypage.tmpl")))
-                c.HTML(http.StatusOK, "base", gin.H{
-                        "CurrentUser": cUser,
-                        "User":        user,
-                        "Products":    sdProducts,
-                        "TotalPay":    totalPay,
-                })
+                hedder := hedder(cUser, mypage_html(cUser, user, totalPay, sdProducts))
+                
+                c.Data(http.StatusOK, "text/html", hedder)
         })
+
 
 
         // GET /products/:productId
@@ -147,14 +138,10 @@ func main() {
                 product := getProduct(pid)
 
                 cUser := currentUser(sessions.Default(c))
-                bought := product.isBought(cUser.ID)
+                isBought := product.isBought(cUser.ID)
 
-                r.SetHTMLTemplate(template.Must(template.ParseFiles(layout, "templates/product.tmpl")))
-                c.HTML(http.StatusOK, "base", gin.H{
-                        "CurrentUser":   cUser,
-                        "Product":       product,
-                        "AlreadyBought": bought,
-                })
+                html := hedder(cUser, product_html(cUser, product, isBought))
+                c.Data(http.StatusOK, "text/html", html)
         })
 
 
