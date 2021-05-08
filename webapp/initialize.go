@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
-	"strconv"
 	"unicode/utf8"
 )
 
@@ -65,7 +64,6 @@ func initProductsWithCommentsAt() [10000]ProductWithComments {
 }
 
 
-//ユーザごとの総購入金額をredisにのせる.
 func initBuyingSum() {
 	// read json
 	raw, err := ioutil.ReadFile("./initBuySum.json")
@@ -75,20 +73,14 @@ func initBuyingSum() {
 	json_buysum := [5000]int{}
 	json.Unmarshal(raw, &json_buysum)
 
-	// redis set
 	for uid := 1; uid <= 5000; uid++ {
-		sum_user := "sum_user" + strconv.Itoa(uid)
-		aerr := rdb.Set(ctx, sum_user, json_buysum[uid-1], 0)
-		if aerr == nil {
-			panic(aerr)
-		}
+		userTotalPay.Store(uid, json_buysum[uid-1])
 	}
 }
 
 
 
 
-//redis: uid+++pid -> bool(int)
 func initIsBought() [5000][10000]bool {
 	// read json
 	raw, err := ioutil.ReadFile("./initIsBought.json")
@@ -140,14 +132,10 @@ func initUsers() [5000]User {
 
 
 
-//comment-countをredisにのせる
 func initCommentsCount() {
 	for i := 1; i<=10000; i++ {
-		pid_string := strconv.Itoa(i)
-		aerr := rdb.Set(ctx, "count_" + pid_string, 20, 0)
-		if aerr == nil {
-				panic(aerr)
-		}
+		//初期状態ではどれもコメント件数は20件
+		commentCount.Store(i, 20)
 	}
 
 }
