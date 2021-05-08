@@ -1,9 +1,5 @@
 package main
 
-import (
-	"strconv"
-)
-
 
 type  JsonProductWithComments struct {
 	ID           int `json:ID`
@@ -51,32 +47,15 @@ func getProduct(pid int) Product {
 }
 
 
-// ユーザの購入金額を取得する.
-func getBuyingSum(uid int) string {
-	sum_user := "sum_user" + strconv.Itoa(uid)
-	sum, err := rdb.Get(ctx, sum_user).Result()
-	if err != nil {
-		panic(err)
-	}
-
-	return sum
-}
-
-
 func getProductsWithCommentsAt(page int) [50]ProductWithComments {
 	products := [50]ProductWithComments{}
 	start_idx := (199 - page) * 50
 	for i := 0; i < 50; i++ {
-			pid_string := strconv.Itoa(start_idx + i + 1)
-			result, err := rdb.Get(ctx, "count_" + pid_string).Result()
-			if err != nil {
-					panic(err)
+			tmp, ok := commentCount.Load(start_idx + i + 1)
+			if ok {
+				productsWithComments[start_idx + i].CommentCount = tmp.(int)
 			}
-
-			cnt, err := strconv.Atoi(result)
-			productsWithComments[start_idx + i].CommentCount = cnt
-
-
+			
 			products[50 - i - 1] = productsWithComments[start_idx + i]
 	}
 
@@ -84,42 +63,15 @@ func getProductsWithCommentsAt(page int) [50]ProductWithComments {
 }
 
 
-// 
 func (p *Product) isBought(uid int) bool {
-	//集計処理が重いのでクエリを変更.
-
-	// logout時にクエリ投げられたときのエスケープ
+	// logout時にクエリ投げられたときのエラーハンドリング
 	if uid == 0 {
 		return false
 	}
 
-	//fmt.Println(uid)
-	/*
-	if isBoughtMemoTable[uid-1][p.ID-1] {
-		return true
-	} else {
-		var count int
-		err := db.QueryRow(
-			"SELECT * as count FROM histories WHERE product_id = ? AND user_id = ? LIMIT 1",
-			p.ID, uid,
-		).Scan(&count)
+	buyingHistoryLock.Lock()
+	res := isBoughtMemoTable[uid-1][p.ID-1]
+	buyingHistoryLock.Unlock()
 
-		isBoughtMemoTable[uid-1][p.ID-1] = true
-
-		return err == nil
-	}
-	*/
-
-	return isBoughtMemoTable[uid-1][p.ID-1]
-	
-	/*
-	var count int
-	err := db.QueryRow(
-		"SELECT * as count FROM histories WHERE product_id = ? AND user_id = ? LIMIT 1",
-		p.ID, uid,
-	).Scan(&count)
-	//isBoughtMemoTable[uid-1][p.ID-1] = true
-
-	return err == nil
-	*/
+	return res
 }
