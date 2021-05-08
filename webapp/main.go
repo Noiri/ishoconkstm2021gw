@@ -7,9 +7,7 @@ import (
 	"os"
 	"strconv"
 
-	"context"
-
-	"github.com/go-redis/redis/v8"
+	"sync"
 
 	"github.com/gin-gonic/contrib/sessions"
 	"github.com/gin-gonic/contrib/static"
@@ -20,18 +18,22 @@ import (
 //mysql
 var db *sql.DB
 
-//redis
-var rdb *redis.Client
-var ctx context.Context
 
+// Lock
+var buyingHistoryLock sync.RWMutex
 
-// Memo Tabels
+// Memo Tabels (imutable, read only)
 var productsWithComments [10000]ProductWithComments // 最新五件を保存するテーブル
 var productMemoTable [10000]Product // productの情報をpid -> productで保存するテーブル
 var userMemoTable [5000]User //userの情報を uid -> user で保存するテーブル
 var authenticateMap map[string]PassAndUid // auth用, email -> password,uid
 
+
+// Cache (mutable)
 var isBoughtMemoTable [5000][10000]bool
+var buyingHistoryCache[5000][]Product
+var userTotalPay sync.Map
+var commentCount sync.Map // comment count
 
 
 func getEnv(key, fallback string) string {
@@ -42,16 +44,6 @@ func getEnv(key, fallback string) string {
 }
 
 func main() {
-        //redis setting
-        ctx = context.Background()
-        rdb = redis.NewClient(&redis.Options{
-                Network:  "unix",
-                Addr:     "/var/run/redis/redis-server.sock",
-                Password: "",
-                DB:       0,
-        })
-
-
         // database setting
         user := getEnv("ISHOCON1_DB_USER", "ishocon")
         pass := getEnv("ISHOCON1_DB_PASSWORD", "ishocon")
@@ -70,6 +62,7 @@ func main() {
         store := sessions.NewCookieStore([]byte("mysession"))
         store.Options(sessions.Options{HttpOnly: true})
         r.Use(sessions.Sessions("showwin_happy", store))
+
 
 
         // GET /login
@@ -96,7 +89,7 @@ func main() {
                         // 認証成功
                         session.Set("uid", user.ID)
                         session.Set("uName", user.Name)
-
+                        
                         session.Save()
                         c.Redirect(http.StatusSeeOther, "/")
                 } else {
@@ -109,11 +102,8 @@ func main() {
                 }
         })
 
-
-        // GET /
         r.GET("/", func(c *gin.Context) {
                 cUser := currentUser(sessions.Default(c))
-
                 page, err := strconv.Atoi(c.Query("page"))
                 if err != nil {
                         page = 0
@@ -137,8 +127,8 @@ func main() {
 
                 // shorten description
                 //左から70文字とるだけなので、sqlでやってしまう.
-                sdProducts := user.BuyingHistory()
-                totalPay := getBuyingSum(uid)
+                sdProducts, totalPay := user.BuyingHistory()
+                //totalPay := getBuyingSum(uid)
 
                 r.SetHTMLTemplate(template.Must(template.ParseFiles(layout, "templates/mypage.tmpl")))
                 c.HTML(http.StatusOK, "base", gin.H{
@@ -148,6 +138,7 @@ func main() {
                         "TotalPay":    totalPay,
                 })
         })
+
 
         // GET /products/:productId
         r.GET("/products/:productId", func(c *gin.Context) {
@@ -165,6 +156,7 @@ func main() {
                         "AlreadyBought": bought,
                 })
         })
+
 
         // POST /products/buy/:productId
         r.POST("/products/buy/:productId", func(c *gin.Context) {
@@ -215,10 +207,9 @@ func main() {
                 db.Exec("DELETE FROM comments WHERE id > 200000")
                 db.Exec("DELETE FROM histories WHERE id > 500000")
 
-                // redisで管理
+                // redisで管理(してた)
                 initCommentsCount()
                 initBuyingSum()
-
                 initIsBought()
 
                 // MemoTableの初期化.
@@ -228,6 +219,8 @@ func main() {
                 authenticateMap = initAuthenticateMap()
 
                 isBoughtMemoTable = initIsBought()
+
+                buyingHistoryCache = initBuyingHistoriy()
 
                 c.String(http.StatusOK, "Finish")
         })
