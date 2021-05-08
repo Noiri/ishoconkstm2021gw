@@ -8,32 +8,37 @@ import (
 )
 
 
-
-func hedder(cuser User, content string) []byte {
-	var buf bytes.Buffer
-	buf.Grow(0x10000)
-
-	io.WriteString(&buf, `<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html" charset="utf-8"><link rel="stylesheet" href="/css/bootstrap.min.css">
+func layout_html(cUser User) string {
+	html := `<!DOCTYPE html><html><head><meta http-equiv="Content-Type" content="text/html" charset="utf-8"><link rel="stylesheet" href="/css/bootstrap.min.css">
 	<title>すごいECサイト</title></head><body><nav class="navbar navbar-inverse navbar-fixed-top"><div class="container"><div class="navbar-header">
-	<a class="navbar-brand" href="/">すごいECサイトで爆買いしよう!</a></div><div class="header clearfix">`)
-	if cuser.ID > 0 {
-		io.WriteString(&buf, `<nav><ul class="nav nav-pills pull-right"><li role="presentation"><a href="/users/` + strconv.Itoa(cuser.ID) + `">` +
-				cuser.Name + `さんの購入履歴</a></li><li role="presentation"><a href="/logout">Logout</a></li></ul></nav>`)
-	} else {
-		io.WriteString(&buf, `<nav><ul class="nav nav-pills pull-right"><li role="presentation"><a href="/login">Login</a></li></ul></nav>`)
-	}
-	io.WriteString(&buf, `</div></nav>`)
+	<a class="navbar-brand" href="/">すごいECサイトで爆買いしよう!</a></div><div class="header clearfix">`
 
+	if cUser.ID > 0 {
+		html +=  (`<nav><ul class="nav nav-pills pull-right"><li role="presentation"><a href="/users/` + strconv.Itoa(cUser.ID) + `">` +
+		cUser.Name + `さんの購入履歴</a></li><li role="presentation"><a href="/logout">Logout</a></li></ul></nav>`)
+	} else {
+		html += (`<nav><ul class="nav nav-pills pull-right"><li role="presentation"><a href="/login">Login</a></li></ul></nav>`)
+	}
+	html += `</div></nav>`
+
+	return html
+}
+
+
+func hedder(cUser User, content string) []byte {
+	var buf bytes.Buffer
+	
+	io.WriteString(&buf, layoutPageHtml[cUser.ID])
+	
 	//{{ template "content" . }}
 	io.WriteString(&buf, content)
-
 	io.WriteString(&buf, `</body></html>`)
-
 
 	byte_html := buf.Bytes()
 
 	return byte_html
 }
+
 
 
 func mypage_html(cuser User, user User, totalPay int, products []Product) string {
@@ -72,8 +77,8 @@ func index_html(isAuth bool,products [50]ProductWithComments) string {
 		pid := strconv.Itoa(p.ID)
 
 		html += `<div class="col-md-4"><div class="panel panel-default"><div class="panel-heading"><a href="/products/`+ pid + `">` + p.Name + `</a></div>` +
-			`<div class="panel-body"><a href="/products/` + pid + `"><img src="` + p.ImagePath + `" class="img-responsive" /></a><h4>価格</h4><p>` + 
-			strconv.Itoa(p.Price) + `円</p><h4>商品説明</h4><p>` + p.Description + `</p><h4>` + strconv.Itoa(p.CommentCount) + `件のレビュー</h4><ul>`
+          `<div class="panel-body"><a href="/products/` + pid + `"><img src="` + p.ImagePath + `" class="img-responsive" /></a><h4>価格</h4><p>` + 
+		  strconv.Itoa(p.Price) + `円</p><h4>商品説明</h4><p>` + p.Description + `</p><h4>` + strconv.Itoa(p.CommentCount) + `件のレビュー</h4><ul>`
 
 		for _, cw := range p.Comments {
 			html += (`<li>` + cw.Content + ` by ` + cw.Writer + `</li>`)
@@ -81,7 +86,7 @@ func index_html(isAuth bool,products [50]ProductWithComments) string {
 		html += `</ul></div>`
 		if isAuth {
 			html += (`<div class="panel-footer"><form method="POST" action="/products/buy/` + pid + `"><fieldset>
-				<input class="btn btn-success btn-block" type="submit" name="buy" value="購入" /></fieldset></form></div>`)
+                  <input class="btn btn-success btn-block" type="submit" name="buy" value="購入" /></fieldset></form></div>`)
 		}
 		html += `</div></div>`
 	}

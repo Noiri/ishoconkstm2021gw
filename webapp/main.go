@@ -36,6 +36,14 @@ var userTotalPay sync.Map
 var commentCount sync.Map // comment count
 
 
+//var IndexHtml [200][2]string
+
+var layoutPageHtml [5001]string
+
+var isMyPageCached [5000][2]bool
+var myPageHtml [5000][2]string
+
+
 func getEnv(key, fallback string) string {
         if value, ok := os.LookupEnv(key); ok {
                 return value
@@ -62,7 +70,6 @@ func main() {
         store := sessions.NewCookieStore([]byte("mysession"))
         store.Options(sessions.Options{HttpOnly: true})
         r.Use(sessions.Sessions("showwin_happy", store))
-
 
 
         // GET /login
@@ -102,8 +109,10 @@ func main() {
                 }
         })
 
+        
         r.GET("/", func(c *gin.Context) {
                 cUser := currentUser(sessions.Default(c))
+
                 page, err := strconv.Atoi(c.Query("page"))
                 if err != nil {
                         page = 0
@@ -117,21 +126,20 @@ func main() {
                         "Products":    products,
                 })
         })
+        
 
-        // GET /users/:userId        
         r.GET("/users/:userId", func(c *gin.Context) {
                 cUser := currentUser(sessions.Default(c))
                 uid, _ := strconv.Atoi(c.Param("userId"))
                 user := getUser(uid)
-                sdProducts, totalPay := user.BuyingHistory()
-                hedder := hedder(cUser, mypage_html(cUser, user, totalPay, sdProducts))
-                
-                c.Data(http.StatusOK, "text/html", hedder)
+
+                myPage := user.BuyingHistory(cUser)
+
+                html := hedder(cUser, myPage)
+                c.Data(http.StatusOK, "text/html", html)
         })
 
 
-
-        // GET /products/:productId
         r.GET("/products/:productId", func(c *gin.Context) {
                 //getCommentいらない.
                 pid, _ := strconv.Atoi(c.Param("productId"))
@@ -194,9 +202,10 @@ func main() {
                 db.Exec("DELETE FROM comments WHERE id > 200000")
                 db.Exec("DELETE FROM histories WHERE id > 500000")
 
-                // redisで管理(してた)
+                // redisで管理
                 initCommentsCount()
                 initBuyingSum()
+
                 initIsBought()
 
                 // MemoTableの初期化.
@@ -208,6 +217,15 @@ func main() {
                 isBoughtMemoTable = initIsBought()
 
                 buyingHistoryCache = initBuyingHistoriy()
+
+
+                // NavigationBarを先に作っておく.
+                for uid := 1; uid <= 5000; uid++ {
+                        user := userMemoTable[uid-1]
+                        layoutPageHtml[uid] = layout_html(user)
+                }
+                layoutPageHtml[0] = layout_html(User{})
+
 
                 c.String(http.StatusOK, "Finish")
         })
